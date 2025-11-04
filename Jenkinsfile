@@ -2,19 +2,20 @@ pipeline {
   agent any
 
   environment {
-    AWS_REGION        = credentials('aws-region-text')
-    AWS_ACCOUNT_ID    = credentials('aws-account-id-text')
-    AWS_ACCESS_KEY_ID = credentials('aws-access-key-id')
-    AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')
-    ECR_REPOSITORY    = 'weather'
-    IMAGE_TAG         = "${env.BUILD_NUMBER}"
-    EKS_CLUSTER_NAME  = credentials('eks-cluster-name-text')
-    K8S_NAMESPACE     = 'default'
+    // Configure these in Jenkins Credentials (Secret text)
+    EC2_HOST = credentials('ec2-host')                // e.g. ec2-54-147-167-84.compute-1.amazonaws.com
+    EC2_USER = credentials('ec2-user-text')           // e.g. ec2-user or ubuntu
+
+    // Configure this in Jenkins Credentials (SSH Username with private key)
+    EC2_SSH_CREDENTIALS = 'ec2-ssh-key'               // private key for the instance
+
+    APP_NAME   = 'weather'
+    IMAGE_TAG  = "${env.BUILD_NUMBER}"
+    REMOTE_DIR = '/opt/weather'
   }
 
   options {
     timestamps()
-    ansiColor('xterm')
   }
 
   stages {
@@ -24,48 +25,53 @@ pipeline {
       }
     }
 
-    stage('AWS Login to ECR') {
+    stage('Provision Docker on EC2') {
       steps {
-        powershell '''
-          $env:AWS_DEFAULT_REGION=$env:AWS_REGION
-          aws --version
-          aws ecr describe-repositories --repository-names $env:ECR_REPOSITORY 2>$null 
-            || aws ecr create-repository --repository-name $env:ECR_REPOSITORY | Out-Null
-          aws ecr get-login-password --region $env:AWS_REGION |
-            docker login --username AWS --password-stdin "$($env:AWS_ACCOUNT_ID).dkr.ecr.$($env:AWS_REGION).amazonaws.com"
-        '''
+        sshagent (credentials: [env.EC2_SSH_CREDENTIALS]) {
+          powershell '''
+            ssh -o StrictHostKeyChecking=no "$env:EC2_USER@$env:EC2_HOST" "which docker || (curl -fsSL https://get.docker.com | sh)"
+            ssh -o StrictHostKeyChecking=no "$env:EC2_USER@$env:EC2_HOST" "sudo systemctl enable --now docker || sudo service docker start || true"
+            ssh -o StrictHostKeyChecking=no "$env:EC2_USER@$env:EC2_HOST" "sudo usermod -aG docker $USER || true"
+          '''
+        }
       }
     }
 
-    stage('Docker Build & Push') {
+    stage('Sync Source to EC2') {
       steps {
-        powershell '''
-          docker version
-          docker build -t "$env:ECR_REPOSITORY:$env:IMAGE_TAG" .
-          docker tag "$env:ECR_REPOSITORY:$env:IMAGE_TAG" "$($env:AWS_ACCOUNT_ID).dkr.ecr.$($env:AWS_REGION).amazonaws.com/$($env:ECR_REPOSITORY):$($env:IMAGE_TAG)"
-          docker push "$($env:AWS_ACCOUNT_ID).dkr.ecr.$($env:AWS_REGION).amazonaws.com/$($env:ECR_REPOSITORY):$($env:IMAGE_TAG)"
-        '''
+        sshagent (credentials: [env.EC2_SSH_CREDENTIALS]) {
+          powershell '''
+            ssh -o StrictHostKeyChecking=no "$env:EC2_USER@$env:EC2_HOST" "sudo mkdir -p $env:REMOTE_DIR && sudo chown -R $USER:$USER $env:REMOTE_DIR"
+            tar -czf - --exclude .git --exclude node_modules . | 
+              ssh -o StrictHostKeyChecking=no "$env:EC2_USER@$env:EC2_HOST" "tar -xzf - -C $env:REMOTE_DIR"
+          '''
+        }
       }
     }
 
-    stage('Configure kubectl (EKS)') {
+    stage('Build Image on EC2') {
       steps {
-        powershell '''
-          $env:AWS_DEFAULT_REGION=$env:AWS_REGION
-          aws eks update-kubeconfig --name $env:EKS_CLUSTER_NAME --region $env:AWS_REGION
-          kubectl version --client
-        '''
+        sshagent (credentials: [env.EC2_SSH_CREDENTIALS]) {
+          powershell '''
+            ssh -o StrictHostKeyChecking=no "$env:EC2_USER@$env:EC2_HOST" "cd $env:REMOTE_DIR && docker build -t $env:APP_NAME:$env:IMAGE_TAG ."
+          '''
+        }
       }
     }
 
-    stage('Deploy to Kubernetes') {
+    stage('Deploy Container on EC2') {
       steps {
-        powershell '''
-          kubectl apply -n $env:K8S_NAMESPACE -f k8s/service.yaml
-          kubectl apply -n $env:K8S_NAMESPACE -f k8s/deployment.yaml
-          kubectl set image -n $env:K8S_NAMESPACE deployment/weather-web weather-web="$($env:AWS_ACCOUNT_ID).dkr.ecr.$($env:AWS_REGION).amazonaws.com/$($env:ECR_REPOSITORY):$($env:IMAGE_TAG)"
-          kubectl rollout status -n $env:K8S_NAMESPACE deploy/weather-web
-        '''
+        sshagent (credentials: [env.EC2_SSH_CREDENTIALS]) {
+          powershell '''
+            $cmd = @'
+set -e
+cd $REMOTE_DIR
+docker rm -f $APP_NAME || true
+docker run -d --name $APP_NAME -p 80:80 --restart unless-stopped $APP_NAME:$IMAGE_TAG
+'@
+            ssh -o StrictHostKeyChecking=no "$env:EC2_USER@$env:EC2_HOST" $cmd
+          '''
+        }
       }
     }
   }
