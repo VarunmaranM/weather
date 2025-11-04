@@ -56,7 +56,7 @@ pipeline {
         withCredentials([sshUserPrivateKey(credentialsId: env.EC2_SSH_CREDENTIALS, keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
           sh '''
             set -e
-            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" "sudo mkdir -p $REMOTE_DIR && sudo chown -R \"$EC2_USER\":\"$EC2_USER\" $REMOTE_DIR"
+            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" "sudo mkdir -p $REMOTE_DIR && sudo rm -rf $REMOTE_DIR/* && sudo chown -R \"$EC2_USER\":\"$EC2_USER\" $REMOTE_DIR"
             tar -czf - --exclude .git --exclude node_modules . | 
               ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" "tar -xzf - -C $REMOTE_DIR"
           '''
@@ -69,7 +69,7 @@ pipeline {
         withCredentials([sshUserPrivateKey(credentialsId: env.EC2_SSH_CREDENTIALS, keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
           sh '''
             set -e
-            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" "cd $REMOTE_DIR && sudo docker build -t $APP_NAME:$IMAGE_TAG ."
+            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" "cd $REMOTE_DIR && sudo docker build --no-cache -t $APP_NAME:$IMAGE_TAG ."
           '''
         }
       }
