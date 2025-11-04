@@ -69,7 +69,17 @@ pipeline {
         withCredentials([sshUserPrivateKey(credentialsId: env.EC2_SSH_CREDENTIALS, keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
           sh '''
             set -e
-            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" "cd $REMOTE_DIR && sudo docker build --no-cache -t $APP_NAME:$IMAGE_TAG ."
+            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" '
+              set -e
+              cd $REMOTE_DIR
+              if grep -q "npm ci" Dockerfile; then
+                echo "Fixing stale Dockerfile (npm ci -> npm install)"
+                sudo sed -i "s/npm ci --no-audit --no-fund/npm install --no-audit --no-fund/" Dockerfile
+              fi
+              echo "--- Dockerfile (first 20 lines) ---"
+              head -n 20 Dockerfile || true
+              sudo docker build --no-cache -t $APP_NAME:$IMAGE_TAG .
+            '
           '''
         }
       }
