@@ -3,9 +3,9 @@ import { GoogleGenAI } from "@google/genai";
 import type { WeatherData } from '../types';
 
 const getApiKey = (): string => {
-  const apiKey = process.env.API_KEY;
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
   if (!apiKey) {
-    throw new Error("API_KEY environment variable not set.");
+    throw new Error("VITE_GEMINI_API_KEY environment variable not set.");
   }
   return apiKey;
 };
