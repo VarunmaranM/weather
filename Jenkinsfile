@@ -3,11 +3,11 @@ pipeline {
 
   environment {
     // Configure these in Jenkins Credentials (Secret text)
-    EC2_HOST = credentials('ec2-host')                // e.g. ec2-54-147-167-84.compute-1.amazonaws.com
-    EC2_USER = credentials('ec2-user-text')           // e.g. ec2-user or ubuntu
+    EC2_HOST = credentials('ec2-host')
+    EC2_USER = credentials('ec2-user-text')
 
-    // Configure this in Jenkins Credentials (SSH Username with private key)
-    EC2_SSH_CREDENTIALS = 'ec2-ssh-key'               // private key for the instance
+    // SSH key credential ID (SSH Username with private key)
+    EC2_SSH_CREDENTIALS = 'ec2-ssh-key'
 
     APP_NAME   = 'weather'
     IMAGE_TAG  = "${env.BUILD_NUMBER}"
@@ -27,11 +27,11 @@ pipeline {
 
     stage('Provision Docker on EC2') {
       steps {
-        sshagent (credentials: [env.EC2_SSH_CREDENTIALS]) {
-          powershell '''
-            ssh -o StrictHostKeyChecking=no "$env:EC2_USER@$env:EC2_HOST" "which docker || (curl -fsSL https://get.docker.com | sh)"
-            ssh -o StrictHostKeyChecking=no "$env:EC2_USER@$env:EC2_HOST" "sudo systemctl enable --now docker || sudo service docker start || true"
-            ssh -o StrictHostKeyChecking=no "$env:EC2_USER@$env:EC2_HOST" "sudo usermod -aG docker $USER || true"
+        withCredentials([sshUserPrivateKey(credentialsId: env.EC2_SSH_CREDENTIALS, keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
+          sh '''
+            set -e
+            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" "which docker || (curl -fsSL https://get.docker.com | sh)"
+            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" "sudo systemctl enable --now docker || sudo service docker start || true"
           '''
         }
       }
@@ -39,11 +39,12 @@ pipeline {
 
     stage('Sync Source to EC2') {
       steps {
-        sshagent (credentials: [env.EC2_SSH_CREDENTIALS]) {
-          powershell '''
-            ssh -o StrictHostKeyChecking=no "$env:EC2_USER@$env:EC2_HOST" "sudo mkdir -p $env:REMOTE_DIR && sudo chown -R $USER:$USER $env:REMOTE_DIR"
+        withCredentials([sshUserPrivateKey(credentialsId: env.EC2_SSH_CREDENTIALS, keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
+          sh '''
+            set -e
+            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" "sudo mkdir -p $REMOTE_DIR && sudo chown -R \"$USER\":\"$USER\" $REMOTE_DIR || sudo chown -R \"$EC2_USER\":\"$EC2_USER\" $REMOTE_DIR"
             tar -czf - --exclude .git --exclude node_modules . | 
-              ssh -o StrictHostKeyChecking=no "$env:EC2_USER@$env:EC2_HOST" "tar -xzf - -C $env:REMOTE_DIR"
+              ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" "tar -xzf - -C $REMOTE_DIR"
           '''
         }
       }
@@ -51,9 +52,10 @@ pipeline {
 
     stage('Build Image on EC2') {
       steps {
-        sshagent (credentials: [env.EC2_SSH_CREDENTIALS]) {
-          powershell '''
-            ssh -o StrictHostKeyChecking=no "$env:EC2_USER@$env:EC2_HOST" "cd $env:REMOTE_DIR && docker build -t $env:APP_NAME:$env:IMAGE_TAG ."
+        withCredentials([sshUserPrivateKey(credentialsId: env.EC2_SSH_CREDENTIALS, keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
+          sh '''
+            set -e
+            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" "cd $REMOTE_DIR && docker build -t $APP_NAME:$IMAGE_TAG ."
           '''
         }
       }
@@ -61,15 +63,10 @@ pipeline {
 
     stage('Deploy Container on EC2') {
       steps {
-        sshagent (credentials: [env.EC2_SSH_CREDENTIALS]) {
-          powershell '''
-            $cmd = @'
-set -e
-cd $REMOTE_DIR
-docker rm -f $APP_NAME || true
-docker run -d --name $APP_NAME -p 80:80 --restart unless-stopped $APP_NAME:$IMAGE_TAG
-'@
-            ssh -o StrictHostKeyChecking=no "$env:EC2_USER@$env:EC2_HOST" $cmd
+        withCredentials([sshUserPrivateKey(credentialsId: env.EC2_SSH_CREDENTIALS, keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
+          sh '''
+            set -e
+            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" "cd $REMOTE_DIR && docker rm -f $APP_NAME || true && docker run -d --name $APP_NAME -p 80:80 --restart unless-stopped $APP_NAME:$IMAGE_TAG"
           '''
         }
       }
