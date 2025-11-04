@@ -8,6 +8,7 @@ README.md
 /dist
 .env
 .env.*
+!.env.local
 **/*.local
 **/*.log
 
