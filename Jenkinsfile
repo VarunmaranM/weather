@@ -34,7 +34,7 @@ pipeline {
               if ! command -v docker >/dev/null 2>&1; then
                 if [ -f /etc/os-release ]; then
                   . /etc/os-release
-                  if [ \"$ID\" = \"amzn\" ] || echo \"$ID_LIKE\" | grep -qi amazon; then
+                  if [ \"\$ID\" = \"amzn\" ] || echo \"\$ID_LIKE\" | grep -qi amazon; then
                     sudo yum update -y || true
                     sudo yum install -y docker
                   else
