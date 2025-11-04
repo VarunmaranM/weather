@@ -28,13 +28,13 @@ pipeline {
     stage('Provision Docker on EC2') {
       steps {
         withCredentials([sshUserPrivateKey(credentialsId: env.EC2_SSH_CREDENTIALS, keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
-          sh '''
+          sh """
             set -e
-            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" '
+            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" "
               if ! command -v docker >/dev/null 2>&1; then
                 if [ -f /etc/os-release ]; then
                   . /etc/os-release
-                  if [ "$ID" = "amzn" ] || echo "$ID_LIKE" | grep -qi amazon; then
+                  if [ \"$ID\" = \"amzn\" ] || echo \"$ID_LIKE\" | grep -qi amazon; then
                     sudo yum update -y || true
                     sudo yum install -y docker
                   else
@@ -45,8 +45,8 @@ pipeline {
                 fi
               fi
               sudo systemctl enable --now docker || sudo service docker start || true
-            '
-          '''
+            "
+          """
         }
       }
     }
@@ -67,20 +67,20 @@ pipeline {
     stage('Build Image on EC2') {
       steps {
         withCredentials([sshUserPrivateKey(credentialsId: env.EC2_SSH_CREDENTIALS, keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
-          sh '''
+          sh """
             set -e
-            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" '
+            ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$EC2_USER@$EC2_HOST" "
               set -e
               cd $REMOTE_DIR
-              if grep -q "npm ci" Dockerfile; then
-                echo "Fixing stale Dockerfile (npm ci -> npm install)"
-                sudo sed -i "s/npm ci --no-audit --no-fund/npm install --no-audit --no-fund/" Dockerfile
+              if [ -f Dockerfile ] && grep -q 'npm ci' Dockerfile; then
+                echo 'Fixing stale Dockerfile (npm ci -> npm install)'
+                sudo sed -i 's/npm ci --no-audit --no-fund/npm install --no-audit --no-fund/' Dockerfile
               fi
-              echo "--- Dockerfile (first 20 lines) ---"
+              echo '--- Dockerfile (first 20 lines) ---'
               head -n 20 Dockerfile || true
               sudo docker build --no-cache -t $APP_NAME:$IMAGE_TAG .
-            '
-          '''
+            "
+          """
         }
       }
     }
